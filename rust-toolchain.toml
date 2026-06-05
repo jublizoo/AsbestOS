@@ -1,0 +1,5 @@
+[toolchain]
+channel = "nightly"
+profile = "default"
+# See .cargo/config.toml
+components = [ "rust-src" ]

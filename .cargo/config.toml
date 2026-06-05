@@ -1,0 +1,21 @@
+[build]
+target = "targets/x86_64-target.json"
+[unstable]
+json-target-spec = true
+# The standard library (including core) is a precompiled binary. We compile
+# without std, so this excludes 
+# In order to build from source, we need the rust-src component.
+build-std = ["core", "compiler_builtins", "alloc"]
+# Core intrinsics functions like core::intrinsics::write_bytes are compiled as 
+# compiler intrinsics, and emitted as symbols like memset. The linker needs to
+# match these symbols. If we are not linking against the C std library, then 
+# these functions are defined in the mem module of the compiler-builtins crate. 
+# The alloc crate has a compiler-builtins-mem feature, enabling the mem module 
+# of the compiler-builtins crate. Thus, we must enable the feature to be able to 
+# link against the intrinsics in that module.
+build-std-features = ["compiler-builtins-mem"]
+
+[target.x86_64-target]
+rustflags = [
+	"-C", "link-arg=-Tlinker.ld"
+]
