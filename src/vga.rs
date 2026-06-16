@@ -75,18 +75,20 @@ impl VgaAttr {
     }
 }
 
+pub fn write_col() {
+    let fg = FgColor { fg0: true, fg1: true, fg2: false };
+    let col = VgaAttr::from_fg(fg).with_bright();
+    let byte = col.as_byte();
+    let s = u8::to_string(&byte);
+    for (i, &ch) in s.as_bytes().iter().enumerate() {
+        write_at_index(ch, i);
+    }
+}
+
 pub fn write_bytes(text: &[u8]) {
     for (i, &ch) in text.iter().enumerate() {
         write_at_index(ch, i);
     }
-
-    // let fg = FgColor { fg0: true, fg1: true, fg2: false };
-    // let col = VgaAttr::from_fg(fg).with_bright();
-    // let byte = col.as_byte();
-    // let s = u8::to_string(&byte);
-    // for (i, &ch) in s.as_bytes().iter().enumerate() {
-    //     write_at_index(ch, i);
-    // }
 }
 
 fn write_at_index(ch: u8, idx: usize) {

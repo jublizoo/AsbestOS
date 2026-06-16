@@ -1,12 +1,8 @@
 SECTIONS {
 	. = 1M;
 
-	.multiboot_header : {
-		/* Keep section even if there are no references */
-		KEEP(*(.multiboot_header))
-	}
-
 	.text : {
+		KEEP(*(.multiboot_header))
 		*(.text .text.*)
 	}
 
