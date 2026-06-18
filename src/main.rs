@@ -70,8 +70,6 @@ fn setup_alloc_or_panic(bootinfo: &BootInformation) {
 
     unsafe { 
         simple_alloc::ALLOCATOR.configure(max_region.start(), max_region.end()); 
-        // let start = max_region.start();
-        // simple_alloc::ALLOCATOR.configure(start, start.add(8)); 
     }
 }
 

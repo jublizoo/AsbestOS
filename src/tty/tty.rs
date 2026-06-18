@@ -68,13 +68,17 @@ impl fmt::Write for StringBuf {
 }
 
 fn test() {
+    let mut s = crate::tty::tty::StringBuf::new();
+    core::fmt::Write::write_fmt(&mut s, format_args!(""))
+        .is_ok()
+        .then_some(Into::<String>::into(s));
 }
 
 #[macro_export]
 macro_rules! kfmt {
     ( $fmt: expr, $( $x: expr ),* ) => {{
         let mut s = $crate::tty::tty::StringBuf::new();
-        core::fmt::Write::write_fmt(&mut s, format_args!(""))
+        core::fmt::Write::write_fmt(&mut s, format_args!($fmt, $($x),*))
             .is_ok()
             .then_some(Into::<String>::into(s))
     }}
