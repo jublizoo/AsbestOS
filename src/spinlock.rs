@@ -38,7 +38,14 @@ impl<T> SpinLock<T> {
         }
     }
 
-    fn force_lock(&self) -> SpinGuard<'_, T> {
+    /// VERY VERY UNSAFE. IF YOU NEED THIS, IT IS PROBABLY UB. ONLY USE FOR PANICS
+    pub unsafe fn force_lock(&self) -> SpinGuard<'_, T> {
+        SpinGuard {
+            lock: self
+        }
+    }
+
+    fn expect_lock(&self) -> SpinGuard<'_, T> {
         self.taken.compare_exchange(false, true, Acquire, Acquire)
             .unwrap();
 

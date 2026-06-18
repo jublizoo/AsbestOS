@@ -2,6 +2,7 @@ SECTIONS {
 	. = 1M;
 
 	.text : {
+		__kernel_start = .;
 		KEEP(*(.multiboot_header))
 		*(.text .text.*)
 	}
@@ -18,4 +19,6 @@ SECTIONS {
 		*(COMMON)
 		*(.bss .bss.*)
 	}
+
+	__kernel_end = .;
 }

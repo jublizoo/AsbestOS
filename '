@@ -1,77 +1,94 @@
-use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::{null, null_mut};
-use crate::spinlock::{SpinLock};
-use crate::math::{Alignable};
-use crate::common::SyncPtr;
+use core::fmt::Write;
+use core::str::from_utf8;
+use core::{fmt, fmt::Error};
 
-/// A simple test allocator.
-///
-/// Allocates by incrementing a pointer, never frees allocations.
-///
-/// Invariant: data at limit is never accessed directly via this struct. It could
-/// still be accessed by the caller of `alloc`.
-struct PushAllocator {
+use super::vga::Vga;
+use alloc::collections::TryReserveError;
+use alloc::vec::Vec;
+use alloc::string::{String, ToString};
+
+struct Tty {
     configured: bool,
-    /// Next available
-    current: SpinLock<*const u8>,
-    /// Last available byte
-    end: SyncPtr<u8>,
+    vga: Vga,
+    lines: Option<Vec<String>>,
 }
 
-/// SAFETY: Data at `limit` is never directly accessed, and `current` is logically `Send + Sync`
-unsafe impl Send for PushAllocator {}
-unsafe impl Sync for PushAllocator {}
-
-impl PushAllocator {
-    pub const fn new() -> Self {
+impl Tty {
+    pub const fn new(vga: Vga) -> Self {
         Self {
             configured: false,
-            current: SpinLock::new(0 as *const u8),
-            end: SyncPtr::new(0 as *const u8),
+            vga,
+            lines: None,
         }
     }
 
-    /// SAFETY: 
-    pub unsafe fn configure(&mut self, start: *const u8, end: *const u8) {
-        self.current = SpinLock::new(start);
-        self.end = SyncPtr::new(end);
+    pub fn configure(&mut self) {
+        self.vga.configure();
+    }
+
+    pub fn configured(&self) -> bool {
+        self.configured
+    }
+
+    pub fn println(_s: &str) {
+        
+
     }
 }
 
-unsafe impl GlobalAlloc for PushAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut current = self.current.lock();
-        let alignment = layout.align() as *const u8;
-        let start = current.align_up(alignment);
-        let lim = unsafe { start.add(layout.size()) };
-        let end = unsafe { lim.sub(1) };
+pub struct StringBuf {
+    buf: Vec<u8>,
+}
 
-        // SAFETY: We never dereference
-        if end > unsafe { self.end.get() } {
-            // Failure
-            return null_mut();
+impl StringBuf {
+    fn new() -> Self {
+        Self {
+            buf: Vec::new(),
         }
-
-        *current = lim;
-        start as *mut u8
-
-    }
-
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) { }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let start = unsafe { self.alloc(layout) };
-        if start.is_null() { return null_mut(); }
-        unsafe { core::ptr::write_bytes(start, 0, layout.size()) };
-        start
     }
 }
 
-
-#[global_allocator]
-static ALLOCATOR: PushAllocator = PushAllocator::new();
-
-#[alloc_error_handler]
-fn alloc_error(_layout: core::alloc::Layout) -> ! {
-    panic!("OOM");
+impl Into<String> for StringBuf {
+    fn into(self) -> String {
+        alloc::string::String::from_utf8(self.buf).unwrap()
+    }
 }
+
+impl fmt::Write for StringBuf {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let bytes = s.as_bytes();
+        let res: Result<(), TryReserveError> = self.buf.try_reserve(bytes.len());
+        if res.is_err() {
+            return Err(Error {});
+        }
+        self.buf.extend_from_slice(bytes);
+
+        Ok(())
+    }
+}
+
+#[macro_export]
+macro_rules! kfmt {
+    ( $fmt: expr, $( $x: expr ),* ) => {{
+        let mut s = $crate::tty::tty::StringBuf::new();
+        s.write_fmt(format_args!($fmt, $( $x ),*)).unwrap();
+        let s: String = s.into();
+        s
+    }};
+}
+
+macro_rules! println {
+    ( $tty: expr, $fmt: expr, $( $x: expr ) ,*) => {
+        let tty: Tty = $tty;
+        tty
+    };
+}
+
+
+// fn x(tty: Tty) -> Result<(), TryReserveError> {
+//     let mut s = String::new();
+//     String::try_reserve(&mut s, 100)?;
+//     fmt::write(&s, format_args!())
+//     println!(tty, 0, 1, 2);
+//     Ok(())
+// }

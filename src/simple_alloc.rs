@@ -13,9 +13,8 @@ use crate::common::SyncPtr;
 /// still be accessed by the caller of `alloc`.
 struct PushAllocatorInternal {
     configured: bool,
-    /// Next available
-    current: *const u8,
-    /// Last available byte
+    /// Next available byte
+    current_byte: *const u8,
     end: *const u8,
 }
 
@@ -23,14 +22,14 @@ impl PushAllocatorInternal {
     const fn new() -> Self {
         Self {
             configured: false,
-            current: core::ptr::null(),
+            current_byte: core::ptr::null(),
             end: core::ptr::null(),
         }
     }
 
     unsafe fn configure(&mut self, start: *const u8, end: *const u8) {
         assert!(!self.configured);
-        self.current = start;
+        self.current_byte = start;
         self.end = end;
         self.configured = true;
     }
@@ -39,25 +38,23 @@ impl PushAllocatorInternal {
         assert!(self.configured);
 
         let alignment = layout.align() as *const u8;
-        let region_start = self.current.align_up(alignment);
-        let region_lim = unsafe { region_start.add(layout.size()) };
-        let region_end = unsafe { region_lim.sub(1) };
+        let region_start = self.current_byte.align_up(alignment);
+        let region_end = unsafe { region_start.add(layout.size()) };
 
         if region_end > self.end {
             // Failure
             return null_mut();
         }
 
-        self.current = region_lim;
+        self.current_byte = region_end;
         region_start as *mut u8
     }
 }
 
-/// SAFETY: Data at `limit` is never directly accessed, and `current` is logically `Send + Sync`
+pub struct PushAllocator(SpinLock<PushAllocatorInternal>);
+
 unsafe impl Send for PushAllocator {}
 unsafe impl Sync for PushAllocator {}
-
-pub struct PushAllocator(SpinLock<PushAllocatorInternal>);
 
 impl PushAllocator {
     const fn new() -> Self {

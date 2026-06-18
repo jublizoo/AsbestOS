@@ -26,11 +26,13 @@ bootstrap_reserve_start:
 
 
 #  Allocate small stack 
+.global stack_base
+.global stack_end
 .section .bss
 .align 16
-stack_bottom:
+stack_base:
 	.skip 16384 # 16KB
-stack_top:
+stack_end:
 
 
 
@@ -44,9 +46,11 @@ stack_top:
 .set SZ_32, 	1 << 6 	# 32-bit default operation size 
 .set LONG_MODE, 1 << 5	# 64-bit code segment
 
+.global gdt_base
+.global gdt_end
 .section .data
 .align 8
-gdt:
+gdt_base:
 .quad 0
 gdt_code:
 .word 0xffff							# Limit lo
@@ -62,13 +66,14 @@ gdt_data:
 .byte PRESENT | NOT_SYS | RW 			# Access
 .byte GRAN_4K | SZ_32 | 0xF				# Flags & limit hi
 .byte 0									# Base hi
+gdt_end:
 # Used for lgdt
 gdt_base_limit:
-	.word . - gdt - 1	# GDT size
-	.long gdt			# GDT base
+	.word . - gdt_base - 1	# GDT size
+	.long gdt_base			# GDT base
 
-.set GDT_CODE_OFFSET, gdt_code - gdt
-.set GDT_DATA_OFFSET, gdt_data - gdt
+.set GDT_CODE_OFFSET, gdt_code - gdt_base
+.set GDT_DATA_OFFSET, gdt_data - gdt_base
 
 
 
@@ -99,7 +104,7 @@ _start:
 	# 32-bit protected mode, interrupts disabled, paging disabled
 
 	cli
-	mov $stack_top, %esp
+	mov $stack_end, %esp
 	push %eax 	# saved_magic
 	push %ebx 	# saved_mbi
 
@@ -171,9 +176,9 @@ _fill_pt_loop:
 
 	ljmp $GDT_CODE_OFFSET, $_enter_main
 
+
+
 .code64
-
-
 _enter_main:
 	call rust_main
 

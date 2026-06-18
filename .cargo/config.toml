@@ -1,5 +1,9 @@
 [build]
 target = "targets/x86_64-target.json"
+
+[run]
+target = "targets/x86_64-target.json"
+
 [unstable]
 json-target-spec = true
 # The standard library (including core) is a precompiled binary. We compile
@@ -19,3 +23,4 @@ build-std-features = ["compiler-builtins-mem"]
 rustflags = [
 	"-C", "link-arg=-Tlinker.ld"
 ]
+runner = "./run-qemu.sh"

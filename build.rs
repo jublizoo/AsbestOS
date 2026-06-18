@@ -6,4 +6,7 @@ fn main() {
     cc::Build::new()
         .file("src/boot.s")
         .compile("boot");
+    cc::Build::new()
+        .file("src/arch/x86/utils.s")
+        .compile("x86_utils");
 }
