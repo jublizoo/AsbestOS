@@ -1,12 +1,15 @@
 use core::panic::PanicInfo;
 use crate::vga::{VGA, VgaAttr, FgColor};
+use crate::tty::TTY;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    let mut vga = unsafe { VGA.force_lock() };
-    if !vga.is_configured() {
-        vga.configure();
+    let mut tty = unsafe { TTY.force_lock() };
+    if !tty.is_configured() {
+        tty.configure();
     }
+
+    let vga = &mut tty.vga;
 
     let red = VgaAttr::from_fg(FgColor::Red);
     vga.write_bytes(b"Panicking", red, 0, 0);

@@ -1,3 +1,6 @@
+[check]
+target = "targets/x86_64-target.json"
+
 [build]
 target = "targets/x86_64-target.json"
 

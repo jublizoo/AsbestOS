@@ -1,13 +1,10 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
+#![feature(formatting_options)]
 #![allow(dead_code)]
 
-use crate::tty::{vga, vga::VgaAttr};
-use crate::common::region::Region;
-use crate::common::buf_vec::BufVec;
-use multiboot2::{BootInformation, BootInformationHeader, MemoryAreaType, MemoryArea};
-use alloc::{fmt::format, format, string::{String, ToString}, vec::Vec};
+extern crate alloc;
 
 mod panic;
 mod simple_alloc;
@@ -16,18 +13,24 @@ mod math;
 mod common;
 mod arch;
 mod tty;
+mod paging;
 
-extern crate alloc;
+use crate::tty::vga;
+use crate::common::region::Region;
+use crate::common::buf_vec::BufVec;
+use multiboot2::{BootInformation, BootInformationHeader, MemoryAreaType};
 
 unsafe extern "C" {
     static __kernel_start: u8;
     static __kernel_end: u8;
 }
 
-
+// Hardcode for now, do something nicer later...
+// Maybe walk PTs during alloc setup?
 const PT_START: *const u8 = 0x1000 as *const u8;
 const PT_END: *const u8 = 0x20000 as *const u8;
 
+// Not meant to be a robust solution.
 fn setup_alloc_or_panic(bootinfo: &BootInformation) {
     let mem_map = bootinfo.memory_map_tag()
         .unwrap()
@@ -60,7 +63,6 @@ fn setup_alloc_or_panic(bootinfo: &BootInformation) {
         }
         avail_regions = buf;
     }
-
 
     assert!(avail_regions.iter().all(|avail| used_regions.iter().all(|used| !used.intersects(&avail))));
 
@@ -100,17 +102,29 @@ fn rust_main(mb_magic: u32, mbi_ptr: u32) -> ! {
 
     setup_alloc_or_panic(&bootinfo);
 
-    let mut vga = vga::VGA.lock();
+    // let mut vga = vga::VGA.lock();
+    let mut tty = tty::TTY.lock();
+    tty.configure();
+    drop(tty);
 
-    let s = kfmt!("magic pointer is: {} (and in hex): {:X}", mb_magic, mb_magic);
-    if let Some(s) = s {
-        vga.write_bytes_default(s.as_bytes(), 0, 0);
-    } else {
-        vga.write_bytes_default(b"No memory :()", 0, 0);
+    // let s = kfmt!("magic pointer is: {} (and in hex): {:X}", mb_magic, mb_magic);
+    kprintln!("hello my name is {}", 5).unwrap();
+    kprintln!().unwrap();
+    kprintln!().unwrap();
+    kprintln!("goodbye my name is {}", 5).unwrap();
+
+    let mut s = alloc::string::String::new();
+    for i in 0..365 {
+        s = alloc::format!("{s}, {i}");
     }
+    s = alloc::format!("{s}, 365");
+    kprintln!("{s}").unwrap();
 
-
-
+    // if let Some(s) = s {
+    //     vga.write_bytes_default(s.as_bytes(), 3, 0);
+    // } else {
+    //     vga.write_bytes_default(b"No memory :()", 3, 0);
+    // }
 
     // let mem_map = bootinfo.memory_map_tag()
     //     .unwrap()

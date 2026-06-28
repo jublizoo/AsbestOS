@@ -1,16 +1,14 @@
-use core::ptr::NonNull;
-use alloc::{string::{String, ToString}, task::Wake};
-use volatile::VolatilePtr;
-
 use crate::{arch::x86::utils::{read_port_byte, write_port_byte}, common::{SyncMutPtr, flags::write_byte_bitmask}};
 use crate::spinlock::SpinLock;
 
+#[derive(Clone, Copy)]
 struct ExternalReg {
     read_port: u16,
     write_port: u16,
 }
 
 /// Graphics, CRT register ports
+#[derive(Clone, Copy)]
 struct SgcPort {
     addr_port: u16,
     data_port: u16,
@@ -110,6 +108,7 @@ impl VgaAttr {
     }
 }
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 struct VgaCell {
     char: u8,
@@ -126,6 +125,7 @@ impl VgaCell {
 }
 
 type VgaBuf = [[VgaCell; VGA_WIDTH as usize]; VGA_HEIGHT as usize];
+type VgaBufLinear = [u8; (VGA_WIDTH as usize) * (VGA_HEIGHT as usize)];
 
 /// Used to modify/query VGA state, caches some VGA state.
 /// For use with VGA text mode, exposes only select functionality.
@@ -141,6 +141,10 @@ pub struct Vga {
     cursor_col: u8,
 }
 
+/// API boundary around Vga exposes just the most basic writing functionality,
+/// but exposing a few higher-level functions like `scroll_by`, which allow for
+/// compilers to use instrinsics (`memcpy`, etc), which would otherwise be more
+/// difficult to optimize from repeated read/set calls.
 impl Vga {
     pub(super) const fn new() -> Self {
         Self {
@@ -165,8 +169,20 @@ impl Vga {
         self.enable_cursor();
     }
 
+    pub fn get_width(&self) -> u16 {
+        VGA_WIDTH as u16
+    }
+
+    pub fn get_height(&self) -> u16 {
+        VGA_HEIGHT as u16
+    }
+
     fn buf(&mut self) -> &mut VgaBuf {
         unsafe { &mut *self.buf.get() }
+    }
+
+    fn buf_linear(&mut self) -> &mut VgaBufLinear {
+        unsafe{ &mut *(self.buf.get() as *mut VgaBufLinear) }
     }
 
     unsafe fn write_external_reg(
@@ -283,19 +299,19 @@ impl Vga {
         unsafe { self.write_graphics_reg(GRAPHICS_MISC_REG_IDX, |x| x) }
     }
 
-    fn write_at(&mut self, ch: u8, attr: VgaAttr, row: u8, col: u8) {
+    pub fn write_at(&mut self, ch: u8, attr: VgaAttr, row: u8, col: u8) {
         self.buf()[row as usize][col as usize] = VgaCell::new(ch, attr);
     }
 
-    fn write_char_at(&mut self, ch: u8, row: u8, col: u8) {
+    pub fn write_char_at(&mut self, ch: u8, row: u8, col: u8) {
         self.buf()[row as usize][col as usize].char = ch;
     }
 
-    fn write_attr_at(&mut self, attr: VgaAttr, row: u8, col: u8) {
+    pub fn write_attr_at(&mut self, attr: VgaAttr, row: u8, col: u8) {
         self.buf()[row as usize][col as usize].attr = attr.as_byte();
     }
 
-    fn write_at_idx(&mut self, ch: u8, attr: VgaAttr, idx: u16) {
+    pub fn write_at_idx(&mut self, ch: u8, attr: VgaAttr, idx: u16) {
         let (row, col) = Self::idx_to_coords(idx);
         self.write_at(ch, attr, row, col);
     }
@@ -315,6 +331,26 @@ impl Vga {
 
         let attr = VgaAttr::from_fg(FgColor::White);
         self.write_bytes(text, attr, start_row, start_col);
+    }
+
+    pub fn shift_by(&mut self, shift_by: u16) {
+        let buf = self.buf_linear();
+
+        for i in 0..(buf.len() - shift_by as usize) {
+            buf[i] = buf[i + shift_by as usize];
+        }
+
+    }
+
+    pub fn scroll_by(&mut self, scroll_by: u8) {
+        let buf = self.buf();
+        for i in 0..((VGA_HEIGHT - scroll_by) as usize) {
+            buf[i] = buf[i + scroll_by as usize]
+        }
+    }
+
+    pub fn scroll_line(&mut self) {
+        self.scroll_by(1);
     }
 }
 

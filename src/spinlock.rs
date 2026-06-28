@@ -2,6 +2,8 @@ use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{Ordering::Acquire, AtomicBool};
 use core::cell::UnsafeCell;
 
+// TODO: Check cache consistency validity of Spinlock
+
 pub struct SpinLock<T> {
     taken: AtomicBool,
     inner: UnsafeCell<T>,

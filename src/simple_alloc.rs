@@ -1,9 +1,8 @@
 use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::{null, null_mut};
+use core::ptr::null_mut;
 use core::sync::atomic::AtomicBool;
 use crate::spinlock::{SpinLock};
 use crate::math::{Alignable};
-use crate::common::SyncPtr;
 
 /// A simple test allocator.
 ///
@@ -36,6 +35,7 @@ impl PushAllocatorInternal {
 
     unsafe fn alloc(&mut self, layout: Layout) -> *mut u8 {
         assert!(self.configured);
+        assert!(!IN_NO_ALLOC_SECTION.load(core::sync::atomic::Ordering::Relaxed));
 
         let alignment = layout.align() as *const u8;
         let region_start = self.current_byte.align_up(alignment);
@@ -79,10 +79,17 @@ unsafe impl GlobalAlloc for PushAllocator {
         let start = unsafe { self.alloc(layout) };
         if start.is_null() { return null_mut(); }
         unsafe { core::ptr::write_bytes(start, 0, layout.size()) };
+
+        let prev_no_alloc = IN_NO_ALLOC_SECTION.load(core::sync::atomic::Ordering::Relaxed);
+        IN_NO_ALLOC_SECTION.store(true, core::sync::atomic::Ordering::Relaxed);
+        IN_NO_ALLOC_SECTION.store(prev_no_alloc, core::sync::atomic::Ordering::Relaxed);
+
         start
+
     }
 }
 
+pub static IN_NO_ALLOC_SECTION: AtomicBool = AtomicBool::new(false);
 
 #[global_allocator]
 pub static ALLOCATOR: PushAllocator = PushAllocator::new();

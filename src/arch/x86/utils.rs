@@ -1,4 +1,3 @@
-
 unsafe extern "C" {
     fn _outb(port: u16, data: u8);
     fn _inb(port: u16) -> u8;

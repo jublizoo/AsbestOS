@@ -1,6 +1,9 @@
 pub mod flags;
 pub mod buf_vec;
+pub mod try_vec;
 pub mod region;
+pub mod no_alloc;
+pub mod string_buf;
 
 pub fn magic_break() { }
 
