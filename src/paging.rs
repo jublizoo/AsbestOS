@@ -1,15 +1,35 @@
+// non-HLAT 4-level paging implementation for x86-64 long mode.
+//
+// # TODO: 
+// - Add paging options
+// - Maintain per-table #(present entries) using ignored bits, to add GC
+// - Larger page sizes
+// - Add direct-mapped region, needs support for sharing paging structures
+// of direct-mapped region between different mappings.
+
 #![allow(clippy::upper_case_acronyms)]
 
-use core::mem::MaybeUninit;
-
-use crate::common::flags::{range_mask, write_byte_bitmask, write_byte_flag};
-
-// TODO:
-// For large mapped regions, use larger page sizes
-// Keep count of pages
+use core::{alloc::Layout, mem::MaybeUninit};
+use ::alloc::alloc::alloc;
+use crate::common::flags::{range_mask, write_byte_bitmask};
 
 const PAGE_SIZE: usize = 4096;
-const PAGE_MAP_NUM_ENTIRES: usize = 512;
+const PAGE_MAP_NUM_ENTRIES: usize = 512;
+
+trait PageMap<E: PageMapEntry>: Sized {
+    fn alloc_and_init_new() -> Result<*mut [E; PAGE_MAP_NUM_ENTRIES], ()> {
+        let layout = Layout::new::<Self>()
+            .align_to(PAGE_SIZE)
+            .unwrap();
+        let pml4t_ptr = unsafe { alloc(layout) } as *mut [E; PAGE_MAP_NUM_ENTRIES];
+        if pml4t_ptr.is_null() {
+            return Err(());
+        }
+        unsafe { *pml4t_ptr = [E::new_empty(); PAGE_MAP_NUM_ENTRIES] };
+
+        Ok(pml4t_ptr)
+    }
+}
 
 trait RawEntry: Sized {
     fn from_bits(bits: u64) -> MaybeUninit<Self>;
@@ -17,7 +37,7 @@ trait RawEntry: Sized {
     fn bits_mut(&mut self) -> &mut u64;
 }
 
-trait PageMapEntry: RawEntry {
+trait PageMapEntry: RawEntry + Copy {
     const PRESENT: u64 =            1 << 0;
     const RW: u64 =                 1 << 1;
     const USER_SUPER: u64 =         1 << 2;
@@ -55,11 +75,20 @@ trait PageMapEntry: RawEntry {
         entry
     }
 
+    fn is_present(&self) -> bool {
+        (self.bits() & Self::PRESENT) != 0
+    }
+
+    fn set_present(&mut self, writable: bool) {
+        *self.bits_mut() = write_byte_bitmask(self.bits(), Self::PRESENT, writable);
+    }
+
+
     fn is_writable(&self) -> bool {
         (self.bits() & Self::RW) != 0
     }
 
-    fn set_writable(&self, writable: bool) {
+    fn set_writable(&mut self, writable: bool) {
         *self.bits_mut() = write_byte_bitmask(self.bits(), Self::RW, writable);
     }
 
@@ -67,10 +96,16 @@ trait PageMapEntry: RawEntry {
         (self.bits() & Self::ACCESSED) != 0
     }
 
-    fn get_addr(&self) -> u64 {
-        self.bits() & Self::ADDR_MASK
+    fn set_accessed(&mut self, accessed: bool) {
+        *self.bits_mut() = write_byte_bitmask(self.bits(), Self::ACCESSED, accessed);
     }
 
+    // TODO: Make trait generic over entry type, return entry pointer?
+    fn get_addr(&self) -> *const u8 {
+        (self.bits() & Self::ADDR_MASK) as *const u8
+    }
+
+    // TODO: Same as above for `addr` param
     fn set_addr(&mut self, addr: *const u8) {
         assert!((addr as u64) & !Self::ADDR_MASK == 0);
 
@@ -100,12 +135,15 @@ trait HigherPageMapEntry: RawEntry {
     }
 }
 
-impl<T: RawEntry> PageMapEntry for T { }
+impl<T: RawEntry + Copy> PageMapEntry for T { }
 
 
 
+#[derive(Clone, Copy)]
 struct PML4E(u64);
-type PML4T = [PML4E; PAGE_MAP_NUM_ENTIRES];
+type PML4T = [PML4E; PAGE_MAP_NUM_ENTRIES];
+
+impl PageMap<PML4E> for PML4T { }
 
 impl RawEntry for PML4E {
     fn from_bits(bits: u64) -> MaybeUninit<Self> { MaybeUninit::new(Self(bits)) }
@@ -127,8 +165,11 @@ impl PML4E {
 
 
 
+#[derive(Clone, Copy)]
 struct PDPTE(u64);
-type PDPT = [PDPTE; PAGE_MAP_NUM_ENTIRES];
+type PDPT = [PDPTE; PAGE_MAP_NUM_ENTRIES];
+
+impl PageMap<PDPTE> for PDPT { }
 
 impl RawEntry for PDPTE {
     fn from_bits(bits: u64) -> MaybeUninit<Self> { MaybeUninit::new(Self(bits)) }
@@ -150,8 +191,11 @@ impl PDPTE {
 
 
 
+#[derive(Clone, Copy)]
 struct PDE(u64);
-type PD = [PDE; PAGE_MAP_NUM_ENTIRES];
+type PD = [PDE; PAGE_MAP_NUM_ENTRIES];
+
+impl PageMap<PDE> for PD { }
 
 impl RawEntry for PDE {
     fn from_bits(bits: u64) -> MaybeUninit<Self> { MaybeUninit::new(Self(bits)) }
@@ -173,8 +217,11 @@ impl PDE {
 
 
 
+#[derive(Clone, Copy)]
 struct PTE(u64);
-type PT = [PTE; PAGE_MAP_NUM_ENTIRES];
+type PT = [PTE; PAGE_MAP_NUM_ENTRIES];
+
+impl PageMap<PTE> for PT { }
 
 impl RawEntry for PTE {
     fn from_bits(bits: u64) -> MaybeUninit<Self> { MaybeUninit::new(Self(bits)) }
@@ -230,4 +277,159 @@ impl PTE {
         self.0 &= !(Self::IGNORED_MASK_1 | Self::IGNORED_MASK_2);
         self.0 |= positioned_bits;
     }
+}
+
+
+pub struct MapOptions {
+    writable: bool,
+    user_accessible: bool,
+}
+
+pub struct PageMapping {
+    inner: *mut PML4T,
+}
+
+impl PageMapping {
+    const ADDR_PML4T_OFFSET_MASK: u64 = range_mask(47, 39);
+    const ADDR_PDPT_OFFSET_MASK: u64 = range_mask(38, 30);
+    const ADDR_PD_OFFSET_MASK: u64 = range_mask(29, 21);
+    const ADDR_PT_OFFSET_MASK: u64 = range_mask(20, 12);
+    const ADDR_PAGE_OFFSET_MASK: u64 = range_mask(11, 0);
+
+    fn new() -> Self {
+        Self {
+            inner: PML4T::alloc_and_init_new(),
+        }
+    }
+
+    fn map_pte(entry: &mut PTE, ppage: *const u8) {
+        assert!((ppage as u64).is_multiple_of(PAGE_SIZE as u64));
+        assert!(!entry.is_present());
+
+        entry.set_addr(ppage);
+        entry.set_present(true);
+    }
+
+    fn alloc_and_map_pde(entry: &mut PDE, vpage: *const u8, ppage: *const u8) -> Result<(), ()> {
+        assert!((ppage as u64).is_multiple_of(PAGE_SIZE as u64));
+        assert!(!entry.is_present());
+
+        let pt_ptr = PT::alloc_and_init_new()?;
+        let pt = unsafe { &mut *pt_ptr };
+        let pt_offset = vpage as u64 & Self::ADDR_PT_OFFSET_MASK;
+        let pte = &mut pt[pt_offset as usize];
+
+        Self::map_pte(pte, ppage);
+        entry.set_addr(pt_ptr as *const u8);
+        entry.set_present(true);
+
+        Ok(())
+    }
+
+    fn alloc_and_map_pdpte(entry: &mut PDPTE, vpage: *const u8, ppage: *const u8) -> Result<(), ()> {
+        assert!((ppage as u64).is_multiple_of(PAGE_SIZE as u64));
+        assert!(!entry.is_present());
+
+        let pd_ptr = PD::alloc_and_init_new()?;
+        let pd = unsafe { &mut *pd_ptr };
+        let pd_offset = vpage as u64 & Self::ADDR_PT_OFFSET_MASK;
+        let pde = &mut pd[pd_offset as usize];
+
+        Self::alloc_and_map_pde(pde, vpage, ppage)?;
+        entry.set_addr(pd_ptr as *const u8);
+        entry.set_present(true);
+
+        Ok(())
+    }
+
+    fn alloc_and_map_pml4e(entry: &mut PML4E, vpage: *const u8, ppage: *const u8) -> Result<(), ()> {
+        assert!((ppage as u64).is_multiple_of(PAGE_SIZE as u64));
+        assert!(!entry.is_present());
+
+        let pdpt_ptr = PDPT::alloc_and_init_new()?;
+        let pdpt = unsafe { &mut *pdpt_ptr };
+        let pdpt_offset = vpage as u64 & Self::ADDR_PT_OFFSET_MASK;
+        let pdpte = &mut pdpt[pdpt_offset as usize];
+
+        Self::alloc_and_map_pdpte(pdpte, vpage, ppage)?;
+        entry.set_addr(pdpt_ptr as *const u8);
+        entry.set_present(true);
+
+        Ok(())
+    }
+
+    pub unsafe fn map_page(&mut self, vpage: *const u8, ppage: *const u8) -> Result<(), ()> {
+        let pml4t_offset = vpage as u64 & Self::ADDR_PML4T_OFFSET_MASK;
+        let pdpt_offset = vpage as u64 & Self::ADDR_PDPT_OFFSET_MASK;
+        let pd_offset = vpage as u64 & Self::ADDR_PD_OFFSET_MASK;
+        let pt_offset = vpage as u64 & Self::ADDR_PT_OFFSET_MASK;
+        let _page_offset = vpage as u64 & Self::ADDR_PAGE_OFFSET_MASK;
+
+        let pml4t = unsafe { &mut *self.inner };
+        let pml4e = &mut pml4t[pml4t_offset as usize];
+        if !pml4e.is_present() {
+            Self::alloc_and_map_pml4e(pml4e, vpage, ppage);
+            return Ok(());
+        }
+
+        let pdpt = unsafe { &mut *(pml4e.get_addr() as *mut PDPT) };
+        let pdpte = &mut pdpt[pdpt_offset as usize];
+        if !pdpte.is_present() {
+            Self::alloc_and_map_pdpte(pdpte, vpage, ppage);
+            return Ok(());
+        }
+
+        let pd = unsafe { &mut *(pdpte.get_addr() as *mut PD) };
+        let pde = &mut pd[pd_offset as usize];
+        if !pde.is_present() {
+            Self::alloc_and_map_pde(pde, vpage, ppage);
+            return Ok(());
+        }
+
+        let pt = unsafe { &mut *(pde.get_addr() as *mut PT) };
+        let pte = &mut pt[pt_offset as usize];
+        assert!(!pte.is_present());
+        pte.set_addr(ppage);
+
+        Ok(())
+    }
+
+    pub unsafe fn unmap_page(&mut self) {
+        let pml4t_offset = vpage as u64 & Self::ADDR_PML4T_OFFSET_MASK;
+        let pdpt_offset = vpage as u64 & Self::ADDR_PDPT_OFFSET_MASK;
+        let pd_offset = vpage as u64 & Self::ADDR_PD_OFFSET_MASK;
+        let pt_offset = vpage as u64 & Self::ADDR_PT_OFFSET_MASK;
+        let _page_offset = vpage as u64 & Self::ADDR_PAGE_OFFSET_MASK;
+
+        let pml4t = unsafe { &mut *self.inner };
+        let pml4e = &mut pml4t[pml4t_offset as usize];
+        if !pml4e.is_present() {
+            Self::alloc_and_map_pml4e(pml4e, vpage, ppage);
+            return Ok(());
+        }
+
+        let pdpt = unsafe { &mut *(pml4e.get_addr() as *mut PDPT) };
+        let pdpte = &mut pdpt[pdpt_offset as usize];
+        if !pdpte.is_present() {
+            Self::alloc_and_map_pdpte(pdpte, vpage, ppage);
+            return Ok(());
+        }
+
+        let pd = unsafe { &mut *(pdpte.get_addr() as *mut PD) };
+        let pde = &mut pd[pd_offset as usize];
+        if !pde.is_present() {
+            Self::alloc_and_map_pde(pde, vpage, ppage);
+            return Ok(());
+        }
+
+        let pt = unsafe { &mut *(pde.get_addr() as *mut PT) };
+        let pte = &mut pt[pt_offset as usize];
+        assert!(!pte.is_present());
+        pte.set_addr(ppage);
+
+        Ok(())
+    }
+
+    // TODO: Fix
+    fn remap_page(&mut self, )
 }
