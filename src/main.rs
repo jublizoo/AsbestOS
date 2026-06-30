@@ -14,11 +14,16 @@ mod common;
 mod arch;
 mod tty;
 mod paging;
+mod idt;
+mod log;
+mod tss;
+mod segmentation;
 
 use crate::tty::vga;
 use crate::common::region::Region;
 use crate::common::buf_vec::BufVec;
-use multiboot2::{BootInformation, BootInformationHeader, MemoryAreaType};
+use multiboot2::{BootInformation, BootInformationHeader, MemoryAreaType, MemoryArea};
+use alloc::string::String;
 
 unsafe extern "C" {
     static __kernel_start: u8;
@@ -29,6 +34,56 @@ unsafe extern "C" {
 // Maybe walk PTs during alloc setup?
 const PT_START: *const u8 = 0x1000 as *const u8;
 const PT_END: *const u8 = 0x20000 as *const u8;
+
+fn print_regions(bootinfo: &BootInformation) {
+    let mem_map = bootinfo.memory_map_tag()
+        .unwrap()
+        .memory_areas();
+
+    for region in mem_map.iter()
+        .filter(|r| r.typ() == MemoryAreaType::Available)
+    {
+        let region: &MemoryArea = region;
+        kprintln!("{:X} -> {:X} ({:?})", 
+            region.start_address(), 
+            region.end_address(), 
+            region.typ()
+        ).unwrap();
+    }
+
+    for region in mem_map.iter()
+        .filter(|r| r.typ() != MemoryAreaType::Available)
+    {
+        let region: &MemoryArea = region;
+        kprintln!("{:X} -> {:X} ({:?})", 
+            region.start_address(), 
+            region.end_address(), 
+            region.typ()
+        ).unwrap();
+    }
+}
+
+fn print_sections(bootinfo: &BootInformation) {
+    if let Some(elf_sections) = bootinfo.elf_sections_tag() {
+        for section in elf_sections.sections() {
+            let section_name = section.name().unwrap_or("[no name]");
+            kprintln!("section {}: {:X} -> {:X}", 
+                section_name,
+                section.start_address(), 
+                section.end_address()
+            ).unwrap();
+        }
+    } else {
+        kprintln!("No section").unwrap();
+    }
+}
+
+fn print_static_regions() {
+    kprintln!("pt: {:X} -> {:X}", (PT_START as u64), (PT_END as u64)).unwrap();
+    let (kstart, kend) = unsafe { (&__kernel_start as *const u8, &__kernel_end as *const u8) };
+    kprintln!("kern: {:X} -> {:X}", (kstart as u64), (kend as u64)).unwrap();
+
+}
 
 // Not meant to be a robust solution.
 fn setup_alloc_or_panic(bootinfo: &BootInformation) {
@@ -42,11 +97,10 @@ fn setup_alloc_or_panic(bootinfo: &BootInformation) {
             used_regions.push(Region::from(&section)).unwrap();
         }
     }
-    used_regions.extend(&unsafe {[
-        Region::new(&__kernel_start, &__kernel_end),
+    used_regions.extend(&[
         Region::new(PT_START, PT_END),
         Region::new(bootinfo.start_address() as *const u8, bootinfo.end_address() as *const u8),
-    ]}).unwrap();
+    ]).unwrap();
 
     let mut avail_regions = BufVec::<_, 128>::new();
     for region in mem_map.iter()
@@ -102,79 +156,15 @@ fn rust_main(mb_magic: u32, mbi_ptr: u32) -> ! {
 
     setup_alloc_or_panic(&bootinfo);
 
-    // let mut vga = vga::VGA.lock();
     let mut tty = tty::TTY.lock();
     tty.configure();
     drop(tty);
 
-    // let s = kfmt!("magic pointer is: {} (and in hex): {:X}", mb_magic, mb_magic);
-    kprintln!("hello my name is {}", 5).unwrap();
-    kprintln!().unwrap();
-    kprintln!().unwrap();
-    kprintln!("goodbye my name is {}", 5).unwrap();
-
     let mut s = alloc::string::String::new();
-    for i in 0..365 {
-        s = alloc::format!("{s}, {i}");
+    for i in 0..300 {
+        s = kfmt!("{s}, current iter: {i}").unwrap();
     }
-    s = alloc::format!("{s}, 365");
     kprintln!("{s}").unwrap();
-
-    // if let Some(s) = s {
-    //     vga.write_bytes_default(s.as_bytes(), 3, 0);
-    // } else {
-    //     vga.write_bytes_default(b"No memory :()", 3, 0);
-    // }
-
-    // let mem_map = bootinfo.memory_map_tag()
-    //     .unwrap()
-    //     .memory_areas();
-    // let attr = VgaAttr::from_fg(vga::FgColor::Green)
-    //     .with_bg(vga::BgColor::Brown);
-    //
-    // for (row, region) in mem_map.iter()
-    //     .filter(|r| r.typ() == MemoryAreaType::Available)
-    //     .enumerate() 
-    // {
-    //     let region: &MemoryArea = region;
-    //     let region_str: String = format!("{:X} -> {:X} ({:?})", region.start_address(), region.end_address(), region.typ());
-    //     vga.write_bytes(region_str.as_bytes(), attr, row as u8, 0);
-    // }
-    //
-    // let attr = VgaAttr::from_fg(vga::FgColor::Magenta)
-    //     .with_bg(vga::BgColor::LightGray);
-    // for (row, region) in mem_map.iter()
-    //     .filter(|r| r.typ() != MemoryAreaType::Available)
-    //     .enumerate() 
-    // {
-    //     let region: &MemoryArea = region;
-    //     let region_str: String = format!("{:X} -> {:X} ({:?})", 
-    //         region.start_address(), region.end_address(), region.typ());
-    //     vga.write_bytes(region_str.as_bytes(), attr, row as u8 + 4, 0);
-    // }
-    //
-    // if let Some(elf_sections) = bootinfo.elf_sections_tag() {
-    //     for (row, section) in elf_sections.sections().enumerate() {
-    //         let section_name = section.name().unwrap_or("[no name]");
-    //         let section_str: String = format!("section {}: {:X} -> {:X}", 
-    //             section_name,
-    //             section.start_address(), 
-    //             section.end_address());
-    //         vga.write_bytes(section_str.as_bytes(), attr, row as u8, 0);
-    //     }
-    // } else {
-    //     vga.write_bytes(b"none", attr, 10, 0);
-    // }
-    //
-    // let start = 20;
-    // let attr = VgaAttr::from_fg(vga::FgColor::BrightRed)
-    //     .with_bg(vga::BgColor::Green)
-    //     .with_blink();
-    // let pt_str: String = format!("pt: {:X} -> {:X}", (PT_START as u64), (PT_END as u64));
-    // vga.write_bytes(pt_str.as_bytes(), attr, start + 1, 0);
-    // let (kstart, kend) = unsafe { (&__kernel_start as *const u8, &__kernel_end as *const u8) };
-    // let pt_str: String = format!("kern: {:X} -> {:X}", (kstart as u64), (kend as u64));
-    // vga.write_bytes(pt_str.as_bytes(), attr, start + 2, 0);
 
     loop { }
 }

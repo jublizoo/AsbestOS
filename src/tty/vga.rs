@@ -333,13 +333,13 @@ impl Vga {
         self.write_bytes(text, attr, start_row, start_col);
     }
 
+    // Shifts the VGA by `shift_by` characters
     pub fn shift_by(&mut self, shift_by: u16) {
         let buf = self.buf_linear();
 
-        for i in 0..(buf.len() - shift_by as usize) {
-            buf[i] = buf[i + shift_by as usize];
+        for i in 0..(buf.len() - 2 * shift_by as usize) {
+            buf[i] = buf[i + 2 * shift_by as usize];
         }
-
     }
 
     pub fn scroll_by(&mut self, scroll_by: u8) {

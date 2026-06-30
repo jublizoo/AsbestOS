@@ -11,4 +11,8 @@ if [ "$GDB" = "1" ]; then
 	extra=(-S -s)
 fi
 
-qemu-system-x86_64 -cdrom kernel.iso -display gtk,zoom-to-fit=on "${extra[@]}"
+qemu-system-x86_64 \
+	-cdrom kernel.iso \
+	-display gtk,zoom-to-fit=on "${extra[@]}" \
+	-serial file:serial.log \
+	# -icount shift=auto,rr=replay,rrfile=replay.bin
