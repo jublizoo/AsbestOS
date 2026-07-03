@@ -63,6 +63,7 @@ impl IdtEntry {
             (dpl as u8) << Self::DPL_OFFSET | 
             (PRESENT as u8) << Self::PRESENT_OFFSET;
 
+        // TODO: Fix addr, no shift
         IdtEntry {
             offset_lo: ((offset as u64) & Self::IDT_OFF_LO_MASK) as u16,
             segsel: Self::CODE_SEGSEL,

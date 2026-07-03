@@ -176,8 +176,6 @@ _fill_pt_loop:
 
 	ljmp $GDT_CODE_OFFSET, $_enter_main
 
-
-
 .code64
 _enter_main:
 	call rust_main

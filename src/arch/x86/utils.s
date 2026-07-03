@@ -12,3 +12,19 @@ _inb:
 	mov %di, %dx
 	inb %dx, %al
 	ret
+
+_ltr:
+	ltr %ax
+	ret
+
+_str:
+	str %di
+	ret
+
+_lgdt:
+	lgdt (%rax)
+	ret
+
+_sgdt:
+	sgdt (%rdi)
+	ret

@@ -161,7 +161,7 @@ fn rust_main(mb_magic: u32, mbi_ptr: u32) -> ! {
     drop(tty);
 
     let mut s = alloc::string::String::new();
-    for i in 0..300 {
+    for i in 0..10 {
         s = kfmt!("{s}, current iter: {i}").unwrap();
     }
     kprintln!("{s}").unwrap();

@@ -29,4 +29,16 @@ pub const fn range_mask(start: u8, last: u8) -> u64 {
     (((1_i64 << 63) >> (63 - last)) ^ ((1_i64 << 63) >> (63 - start))) as u64
 }
 
+/// Unlike `range_mask`, the order of start/end matters
+pub const fn bits_in_range(bits: u64, start: u8, last: u8) -> u64 {
+    let mask = range_mask(start, last);
+    (bits & mask) >> start
+}
+
+pub const fn bits_in_range_2(bits: u64, range: (u8, u8)) -> u64 {
+    bits_in_range(bits, range.0, range.1)
+}
+
+
+
 // TODO: Macro for bitflags
